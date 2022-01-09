@@ -1,0 +1,130 @@
+
+#------------------Packages
+
+library(GetDFPData2)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(ggthemes)
+library(ggpubr)
+library(scales)
+library(hrbrthemes)
+
+#------------------Get Company
+
+df_info <- get_info_companies(tempdir())
+search_company('Santos Brasil', cache_folder = tempdir()) #17892
+
+
+#------------------Downloading DFP Data
+
+DataSantos <- get_dfp_data(companies_cvm_codes = 21881, use_memoise = FALSE, 
+clean_data = TRUE, cache_folder = tempdir(), type_docs = c('BPA', 'BPP','DRE'), 
+type_format = 'con', first_year = 2013, last_year = 2021)
+
+#------------------Managing Data
+
+# 1. Endividamento
+# 2. Liquidez
+# 3. Retorno
+
+DRE_STB <- DataSantos[["DF Consolidado - Demonstração do Resultado"]]
+BPA_STB <- DataSantos[["DF Consolidado - Balanço Patrimonial Ativo"]] 
+BPP_STB <- DataSantos[["DF Consolidado - Balanço Patrimonial Passivo"]]
+
+# 1. Endividamento
+
+End_STB <- select(BPP_STB, DT_FIM_EXERC, DS_CONTA, VL_CONTA)
+Passivo_Oneroso <- End_STB[End_STB$DS_CONTA=="Empréstimos e Financiamentos",]
+Patrimonio <- End_STB[End_STB$DS_CONTA=="Patrimônio Líquido Consolidado",]
+
+Erase_Duplicate <- Passivo_Oneroso %>% 
+  group_by(VL_CONTA) %>% filter (! duplicated(VL_CONTA)) #apagar duplicada
+
+Juntando <- aggregate(x= Erase_Duplicate$VL_CONTA,
+          by= list(Erase_Duplicate$DT_FIM_EXERC),  #unificar CP e LP (prazo)
+          FUN = sum)
+
+colnames(Juntando) <- c("Data", "Passivo Oneroso Total")
+colnames(Patrimonio) <- c("Data", "Conta", "PL")
+
+Merged <- merge(Patrimonio, Juntando, by = "Data")
+
+Merged$Conta = NULL
+Merged$Endividamento <- Merged$`Passivo Oneroso Total` / 
+  (Merged$`Passivo Oneroso Total` + Merged$PL)  #% do Capital de Terceiros
+
+Merged$Endividamento <- percent(x=Merged$Endividamento, digits=1)
+
+Merged$PL <- Merged$PL * 1/1000
+Merged$`Passivo Oneroso Total` <- Merged$`Passivo Oneroso Total` * 1/1000
+
+colnames(Merged) <- c("Data", "Patrimônio Líquido", "Passivo Oneroso",
+                      "Endividamento")
+
+Merged
+
+#-------Plot Endividamento
+
+D1 <- Merged %>%
+  ggplot(aes(x=Data, y=Endividamento)) + 
+  geom_line(color="#bf812d") +
+  geom_area(fill="#bf812d", alpha= 0.5) +
+  labs(title="Santos Brasil STBP: Nível de Endividamento - % Passivo Oneroso") +
+  theme_clean(base_size = 17) + coord_cartesian(ylim=c(0,0.8))
+
+D2 <- Merged %>%
+  ggplot(aes(x=Data)) +
+  geom_col(aes(y=`Patrimônio Líquido`), fill= "#045a8d", alpha=0.6) +
+  geom_col(aes(y=`Passivo Oneroso`), fill="#b30000", alpha=0.7) +
+  scale_y_continuous(name="em R$ Milhões") + theme_clean(base_size = 17)
+  
+G <- subplot(D2, D1, titleY = T, margin = 0.028)
+ggplotly(G)  
+
+
+# 2. Liquidez
+
+LQA_STB <- select(BPA_STB, DT_FIM_EXERC, DS_CONTA, VL_CONTA)
+LQB_STB <- select(BPP_STB, DT_FIM_EXERC, DS_CONTA, VL_CONTA)
+Ativo_Circulante <- LQA_STB[LQA_STB$DS_CONTA=="Ativo Circulante",]
+Passivo_Circulante <- LQB_STB[LQB_STB$DS_CONTA=="Passivo Circulante",]
+colnames(Ativo_Circulante) <- c("Data", "Conta", "Ativo Circulante")
+colnames(Passivo_Circulante) <- c("Data", "Conta", "Passivo Circulante")
+
+Ativo_Circulante$Conta = NULL
+Passivo_Circulante$Conta = NULL
+
+Unir <- merge(Ativo_Circulante, Passivo_Circulante, by= "Data")
+Unir$`Índice de Liquidez Corrente` <- Unir$`Ativo Circulante`/
+  Unir$`Passivo Circulante`
+
+Unir$`Ativo Circulante` <- Unir$`Ativo Circulante` * 1/1000
+Unir$`Passivo Circulante` <- Unir$`Passivo Circulante` * 1/1000
+
+Unir
+
+#-------Plot Liquidez
+
+E1 <- Unir %>%
+  ggplot(aes(x=Data, y=`Índice de Liquidez Corrente`)) + 
+  geom_line(color="#bf812d") +
+  geom_area(fill="#bf812d", alpha= 0.5) +
+  labs(title="Santos Brasil STBP: Nível de Endividamento e Liquidez (R$ e %)") +
+  theme_clean(base_size = 17) + coord_cartesian(ylim=c(0,5))
+
+E2 <- Unir %>%
+  ggplot(aes(x=Data)) +
+  geom_col(aes(y=`Ativo Circulante`), fill= "#045a8d", alpha=0.6) +
+  geom_col(aes(y=`Passivo Circulante`), fill="#b30000", alpha=0.7) +
+  scale_y_continuous(name="em R$ Milhões") + theme_clean(base_size = 17)
+
+G1 <- subplot(E2, E1, titleY = T, margin = 0.028)
+ggplotly(G1)  
+
+#plot Liquidez + Endividamento
+
+subplot(G, G1, nrows = 2, titleY = T, margin = 0.028)
+
+ggarrange(D1,D2,E1,E2, nrow = 2)
