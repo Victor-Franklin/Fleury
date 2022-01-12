@@ -14,7 +14,7 @@ library(hrbrthemes)
 #------------------Get Company
 
 df_info <- get_info_companies(tempdir())
-search_company('Santos Brasil', cache_folder = tempdir()) #17892
+search_company('Fleury', cache_folder = tempdir()) #21881
 
 
 #------------------Downloading DFP Data
@@ -62,7 +62,9 @@ Merged$`Passivo Oneroso Total` <- Merged$`Passivo Oneroso Total` * 1/1000
 
 colnames(Merged) <- c("Data", "Patrimônio Líquido", "Passivo Oneroso",
                       "Endividamento")
-
+Merged$Endividamento <- round(Merged$Endividamento, digits = 2)
+Merged$`Patrimônio Líquido` <- round(Merged$`Patrimônio Líquido`, digits = 2)
+Merged$`Passivo Oneroso` <- round(Merged$`Passivo Oneroso`, digits = 2)
 Merged
 
 #-------Plot Endividamento
@@ -71,7 +73,7 @@ D1 <- Merged %>%
   ggplot(aes(x=Data, y=Endividamento)) + 
   geom_line(color="#bf812d") +
   geom_area(fill="#bf812d", alpha= 0.5) +
-  labs(title="Santos Brasil STBP: Nível de Endividamento - % Passivo Oneroso") +
+  labs(title="Fleury SA: Nível de Endividamento - % Passivo Oneroso") +
   theme_clean(base_size = 17) + coord_cartesian(ylim=c(0,0.8))
 
 D2 <- Merged %>%
@@ -103,6 +105,11 @@ Unir$`Índice de Liquidez Corrente` <- Unir$`Ativo Circulante`/
 Unir$`Ativo Circulante` <- Unir$`Ativo Circulante` * 1/1000
 Unir$`Passivo Circulante` <- Unir$`Passivo Circulante` * 1/1000
 
+Unir$`Índice de Liquidez Corrente` <- round(Unir$`Índice de Liquidez Corrente`, 
+                                            digits = 2)
+Unir$`Ativo Circulante` <- round(Unir$`Ativo Circulante`, digits = 2)
+Unir$`Passivo Circulante` <- round(Unir$`Passivo Circulante`, digits = 2)
+
 Unir
 
 #-------Plot Liquidez
@@ -111,7 +118,7 @@ E1 <- Unir %>%
   ggplot(aes(x=Data, y=`Índice de Liquidez Corrente`)) + 
   geom_line(color="#bf812d") +
   geom_area(fill="#bf812d", alpha= 0.5) +
-  labs(title="Santos Brasil STBP: Nível de Endividamento e Liquidez (R$ e %)") +
+  labs(title="Fleury SA: Níveis de Endividamento Oneroso e Liquidez") +
   theme_clean(base_size = 17) + coord_cartesian(ylim=c(0,5))
 
 E2 <- Unir %>%
@@ -122,9 +129,58 @@ E2 <- Unir %>%
 
 G1 <- subplot(E2, E1, titleY = T, margin = 0.028)
 ggplotly(G1)  
+?theme_clean
 
 #plot Liquidez + Endividamento
 
-subplot(G, G1, nrows = 2, titleY = T, margin = 0.028)
+subplot(G, G1, nrows = 2, titleY = T, margin = 0.03) 
 
-ggarrange(D1,D2,E1,E2, nrow = 2)
+Unir
+Merged
+
+
+# 3. Retorno
+
+Patrimonio # Vector já estava feito
+DRE1 <- select(DRE_STB, DT_FIM_EXERC, DS_CONTA, VL_CONTA )
+DRE2 <- DRE1[DRE1$DS_CONTA=="Resultado Líquido das Operações Continuadas",]
+DRE2$DS_CONTA = NULL
+colnames(DRE2) = c("Data", "Lucro Líquido")
+colnames(Patrimonio) = c("Data", "Conta", "Patrimonio Líquido")
+Mesclando <- merge(Patrimonio, DRE2, by="Data")
+Mesclando$Conta = NULL
+Mesclando$`Patrimonio Líquido` <- Mesclando$`Patrimonio Líquido` * 1/1000
+Mesclando$`Lucro Líquido` <- Mesclando$`Lucro Líquido` * 1/1000
+
+# ROE
+
+Mesclando$`Return on Equity` <- Mesclando$`Lucro Líquido` / Mesclando$`Patrimonio Líquido`
+Mesclando$`Return on Equity` <- round(Mesclando$`Return on Equity`, digits=2)
+Mesclando$`Lucro Líquido` <- round(Mesclando$`Lucro Líquido`, digits = 2)
+Mesclando$ROE = NULL
+Mesclando$`Patrimonio Líquido` <- round(Mesclando$`Patrimonio Líquido`, digits = 2)
+Mesclando
+
+#-------Plot Retorno
+
+F1 <- Mesclando %>%
+  ggplot(aes(x=Data, y=`Return on Equity`)) + 
+  geom_line(color="#bf812d") +
+  geom_area(fill="#bf812d", alpha= 0.5) +
+  labs(title="Fleury SA: Níveis de Endividamento Oneroso, Liquidez e Retorno") +
+  theme_clean(base_size = 17) + coord_cartesian(ylim=c(0,0.4))
+
+F2 <- Mesclando %>%
+  ggplot(aes(x=Data)) +
+  geom_col(aes(y=`Patrimonio Líquido`), fill= "#045a8d", alpha=0.6) +
+  geom_col(aes(y=`Lucro Líquido`), fill="#b30000", alpha=0.7) +
+  scale_y_continuous(name="em R$ Milhões") + theme_clean(base_size = 17)
+
+G2 <- subplot(F2, F1, titleY = T, margin = 0.028)
+
+subplot(G, G1, G2, nrows = 3, titleY = T, margin = 0.03)
+
+Merged
+Unir
+Mesclando
+
